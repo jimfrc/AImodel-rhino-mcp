@@ -1,0 +1,45 @@
+本仓库包含第三方开源代码，其版权与许可声明如下。
+
+================================================================================
+1. GOLEM-3DMCP
+   来源   : https://github.com/TheKingHippopotamus/GOLEM-3DMCP-Rhino-
+   许可   : MIT (Copyright (c) 2026 KingHippo)
+   收录位置:
+     golem_3dmcp/     —— 服务端（MCP server + TCP 客户端 + 89 个工具定义）
+     rhino_plugin/    —— Rhino 端插件（上游目录名为 _rhino_plugin，
+                          本仓库为包名兼容重命名为 rhino_plugin）
+   本仓库相对上游的改动（仅两处，均为缺陷修复）:
+     a) golem_3dmcp/connection.py
+        重连判定由 (BrokenPipeError, ConnectionResetError) 放宽为内建
+        ConnectionError，以覆盖 ConnectionAbortedError(10053)、
+        ConnectionRefusedError(10061) 以及读端 EOF 的情况。
+        修复「连接被中止后坏 socket 被反复复用、后续每次调用永久失败」。
+     b) rhino_plugin/server.py
+        _accept_loop 由「同步处理单个客户端」改为「每个客户端一个线程」，
+        listen backlog 由 5 提升到 16。
+        修复「一个长连接阻塞 accept 循环，backlog 塞满后 9876 拒绝一切新连接」。
+     c) rhino_plugin/server.py 中的 srv.listen 数值调整同属 (b)。
+
+--------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2026 KingHippo
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+================================================================================

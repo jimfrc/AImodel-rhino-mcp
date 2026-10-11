@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GOLEM Rhino 建模</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+    --fg:#e6e8ee; --dim:#8b93a7; --accent:#4c9aff; --ok:#3ddc97; --err:#ff6b6b;
+    --mono:"Cascadia Mono",Consolas,"Courier New",monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--fg);font:14px/1.65 "Segoe UI","Microsoft YaHei",sans-serif;display:flex;flex-direction:column}
+  header{display:flex;align-items:center;gap:12px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+  header h1{font-size:15px;margin:0;font-weight:600}
+  #dot{width:9px;height:9px;border-radius:50%;background:#666;flex:0 0 auto}
+  #dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  #dot.off{background:var(--err);box-shadow:0 0 8px var(--err)}
+  #status{font-size:12px;color:var(--dim);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  button{background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 12px;cursor:pointer;font-size:13px}
+  button:hover{border-color:var(--accent)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  #log{flex:1;overflow-y:auto;padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+  .msg{max-width:860px;display:flex;flex-direction:column;gap:6px}
+  .msg.user{align-self:flex-end;align-items:flex-end}
+  .bubble{padding:9px 13px;border-radius:10px;background:var(--panel);border:1px solid var(--line);white-space:pre-wrap;word-break:break-word}
+  .user .bubble{background:#20304a;border-color:#2c4570}
+  .trace{font-family:var(--mono);font-size:12px;color:var(--dim);border-left:2px solid var(--line);padding:3px 0 3px 10px;white-space:pre-wrap;word-break:break-word}
+  .trace .name{color:var(--accent)}
+  .trace.fail .name{color:var(--err)}
+  details.trace summary{cursor:pointer;color:var(--dim);outline:none}
+  .shot{max-width:620px;border:1px solid var(--line);border-radius:8px;cursor:zoom-in;background:#000}
+  #bar{display:flex;gap:9px;padding:12px 16px;background:var(--panel);border-top:1px solid var(--line)}
+  textarea{flex:1;resize:none;height:52px;padding:9px 11px;border-radius:8px;border:1px solid var(--line);
+    background:var(--bg);color:var(--fg);font:14px/1.5 inherit;outline:none}
+  textarea:focus{border-color:var(--accent)}
+  #lightbox{position:fixed;inset:0;background:rgba(0,0,0,.86);display:none;align-items:center;justify-content:center;z-index:9}
+  #lightbox img{max-width:96vw;max-height:96vh}
+</style>
+</head>
+<body>
+<header>
+  <div id="dot"></div>
+  <h1>GOLEM Rhino 建模</h1>
+  <div id="status">正在检测 Rhino…</div>
+  <button id="btn-undo" title="撤销最近一次写操作">撤销一步</button>
+  <button id="btn-reset" title="清空对话上下文">新会话</button>
+</header>
+
+<div id="log"></div>
+
+<div id="bar">
+  <textarea id="input" placeholder="描述你要建的东西，例如：在原点建一个半径 10 的球，尺寸用文档当前单位（Enter 发送，Shift+Enter 换行）"></textarea>
+  <button id="send">发送</button>
+</div>
+
+<div id="lightbox"><img id="lightbox-img" alt="截图" /></div>
+
+<script>
+const log = document.getElementById('log');
+const input = document.getElementById('input');
+const sendBtn = document.getElementById('send');
+const dot = document.getElementById('dot');
+const statusEl = document.getElementById('status');
+const undoBtn = document.getElementById('btn-undo');
+const resetBtn = document.getElementById('btn-reset');
+const lightbox = document.getElementById('lightbox');
+const lightboxImg = document.getElementById('lightbox-img');
+
+let ws = null, busy = false;
+
+function el(tag, cls, text){ const e = document.createElement(tag); if(cls) e.className = cls; if(text!=null) e.textContent = text; return e; }
+function scroll(){ log.scrollTop = log.scrollHeight; }
+
+function addUser(text){ const d = el('div','msg user'); d.appendChild(el('div','bubble', text)); log.appendChild(d); scroll(); }
+function addBubble(text){ const d = el('div','msg'); d.appendChild(el('div','bubble', text)); log.appendChild(d); scroll(); return d; }
+function addTrace(kind, text){
+  const d = el('div','msg');
+  const p = el('div','trace ' + (kind==='fail'?'fail':''), text);
+  d.appendChild(p); log.appendChild(d); scroll(); return p;
+}
+function addTraceDetail(summary, body){
+  const d = el('div','msg');
+  const det = document.createElement('details'); det.className = 'trace';
+  det.appendChild(el('summary', null, summary));
+  det.appendChild(el('div', null, body));
+  d.appendChild(det); log.appendChild(d); scroll(); return det;
+}
+function addImage(b64, caption){
+  const d = el('div','msg');
+  const img = document.createElement('img'); img.className = 'shot';
+  img.src = 'data:image/png;base64,' + b64;
+  img.onclick = () => { lightboxImg.src = img.src; lightbox.style.display='flex'; };
+  if(caption) img.title = caption;
+  d.appendChild(img); log.appendChild(d); scroll();
+}
+lightbox.onclick = () => { lightbox.style.display = 'none'; };
+
+function setBusy(v){ busy = v; sendBtn.disabled = v; sendBtn.textContent = v ? '建模中…' : '发送'; }
+
+function handle(ev){
+  switch(ev.type){
+    case 'tool_call': {
+      const args = ev.args && Object.keys(ev.args).length ? JSON.stringify(ev.args) : '';
+      addTrace(null, '→ ' + ev.name + (args ? '(' + args + ')' : '()'));
+      break;
+    }
+    case 'tool_result':
+      if(!ev.ok) addTrace('fail', '← ' + ev.name + ' 失败: ' + ev.text);
+      else if(ev.text && ev.text.length > 220) addTraceDetail('← ' + ev.name + ' 返回（点击展开）', ev.text);
+      else if(ev.text) addTrace(null, '← ' + ev.name + ': ' + ev.text);
+      break;
+    case 'image': addImage(ev.data, ev.caption); break;
+    case 'assistant': addBubble(ev.text); break;
+    case 'error': addTrace('fail', '⚠ ' + (ev.message||'未知错误')); break;
+    case 'info': addTrace(null, '· ' + ev.message); break;
+    case 'done': setBusy(false); break;
+  }
+}
+
+function connect(){
+  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  ws = new WebSocket(proto + location.host + '/ws');
+  ws.onopen = () => { statusEl.textContent = '已连接，等待输入'; };
+  ws.onmessage = (e) => handle(JSON.parse(e.data));
+  ws.onclose = () => { addTrace('fail','⚠ 连接已断开，2 秒后重连'); setTimeout(connect, 2000); };
+}
+
+function send(){
+  const text = input.value.trim();
+  if(!text || busy) return;
+  if(!ws || ws.readyState !== 1){ addTrace('fail','⚠ 尚未连接'); return; }
+  addUser(text); input.value = ''; setBusy(true);
+  ws.send(JSON.stringify({ text }));
+}
+
+sendBtn.onclick = send;
+input.addEventListener('keydown', (e) => {
+  if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); }
+});
+
+undoBtn.onclick = async () => {
+  addTrace(null, '→ 撤销一步（Rhino _Undo）');
+  const r = await fetch('/api/undo', { method:'POST' }).then(r=>r.json()).catch(e=>({ok:false,message:String(e)}));
+  if(r.ok) addTrace(null, '← 撤销成功: ' + (r.data || ''));
+  else addTrace('fail', '← 撤销失败: ' + (r.message || ''));
+};
+
+resetBtn.onclick = () => {
+  if(ws && ws.readyState === 1) ws.send(JSON.stringify({ action:'reset' }));
+  log.innerHTML = '';
+};
+function docSummary(info){
+  if(!info || typeof info !== 'object') return '';
+  const keys = ['document_name','name','file_name','unit_system','units','unit','object_count','objects'];
+  const parts = [];
+  for(const k of keys){
+    if(info[k] !== undefined && info[k] !== null && typeof info[k] !== 'object'){
+      parts.push(k + '=' + info[k]);
+    }
+  }
+  return parts.slice(0, 4).join(' · ');
+}
+
+async function pollStatus(){
+  let txt = '';
+  try{
+    const r = await fetch('/api/status').then(r=>r.json());
+    if(r.online){
+      dot.className = 'on';
+      txt = 'Rhino 127.0.0.1:' + r.port + ' 在线 · 工具 ' + (r.tool_count ?? '?') + ' 个';
+      const s = docSummary(r.info);
+      if(s) txt += ' · ' + s;
+    }else{
+      dot.className = 'off';
+      txt = 'Rhino 插件未启动（127.0.0.1:' + r.port + '）— 在 Rhino 的 ScriptEditor 里运行 golem-mcp\\start_in_rhino.py';
+      if(r.mcp_error) txt += '　MCP: ' + r.mcp_error;
+    }
+    if(r.api_key === false) txt += '　⚠ 未配置 API Key（写 .env 的 DEEPSEEK_API_KEY 后重启）';
+  }catch(e){ dot.className='off'; txt = '状态检测失败：' + e; }
+  statusEl.textContent = txt;
+  setTimeout(pollStatus, 4000);
+}
+
+connect();
+pollStatus();
+input.focus();
+</script>
+</body>
+</html>

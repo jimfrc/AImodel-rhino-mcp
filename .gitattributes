@@ -1,0 +1,9 @@
+# 统一换行符：源码一律 LF，Windows 批处理用 CRLF，二进制不做转换
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.3dm binary
